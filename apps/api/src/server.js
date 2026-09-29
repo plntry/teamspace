@@ -27,53 +27,43 @@ const messages = {
     },
   },
   project: {
-    notFound: {
+    NOT_FOUND: {
       message: "Project not found",
     },
-    invalidId: {
+    INVALID_ID: {
       message: "Invalid project id",
     },
   },
 };
 
+// general helpers
+function sendJSON(response, statusCode, data) {
+  response.statusCode = statusCode;
+
+  if (statusCode === 204) {
+    response.end();
+  } else {
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify(data));
+  }
+}
+
 // project id helpers
-function getRawId(request) {
-  const parts = request.url.split("/");
-  return parts[2];
-}
+function parseProjectId(request) {
+  const url = new URL(request.url, "http://localhost");
+  const parts = url.pathname.split("/");
 
-function validateIdPresent(id, response) {
-  if (!id) {
-    response.statusCode = 404;
-    response.setHeader("Content-Type", "application/json");
-    response.end(JSON.stringify(messages.project.notFound));
-
-    return false;
+  if (parts.length !== 3 || parts[1] !== "projects" || !parts[2]) {
+    return { id: null, error: "NOT_FOUND" };
   }
 
-  return true;
-}
+  const id = +parts[2];
 
-function validateIdInteger(id, response) {
   if (!Number.isInteger(id) || id <= 0) {
-    response.statusCode = 400;
-    response.setHeader("Content-Type", "application/json");
-    response.end(JSON.stringify(messages.project.invalidId));
-
-    return false;
+    return { id: null, error: "INVALID_ID" };
   }
 
-  return true;
-}
-
-function validateId(id, response) {
-  return validateIdPresent(id, response) && validateIdInteger(+id, response);
-}
-
-function getProjectId(request, response) {
-  const rawId = getRawId(request);
-
-  return validateId(rawId, response) ? +rawId : null;
+  return { id, error: null };
 }
 
 // project request body helpers
@@ -120,17 +110,13 @@ async function getValidatedProjectData(request, response) {
   try {
     data = await parseRequestBody(request);
   } catch (error) {
-    response.statusCode = 400;
-    response.setHeader("Content-Type", "application/json");
-    response.end(JSON.stringify(messages.invalidJSON));
+    sendJSON(response, 400, messages.invalidJSON);
 
     return null;
   }
 
   if (!validateProjectData(data)) {
-    response.statusCode = 400;
-    response.setHeader("Content-Type", "application/json");
-    response.end(JSON.stringify(messages.projects.nameRequired));
+    sendJSON(response, 400, messages.projects.nameRequired);
 
     return null;
   }
@@ -143,66 +129,67 @@ const server = http.createServer(async (request, response) => {
   console.log(`${request.method} ${request.url}`);
 
   if (request.method === "GET" && request.url === "/") {
-    response.statusCode = 200;
-    response.setHeader("Content-Type", "application/json");
-    response.end(JSON.stringify(messages.root));
+    sendJSON(response, 200, messages.root);
 
     return;
   }
 
   if (request.method === "GET" && request.url === "/projects") {
-    response.statusCode = 200;
-    response.setHeader("Content-Type", "application/json");
-    response.end(JSON.stringify(projects));
+    sendJSON(response, 200, projects);
 
     return;
   }
 
   if (request.method === "GET" && request.url.startsWith("/projects/")) {
-    const id = getProjectId(request, response);
+    const { id, error } = parseProjectId(request);
 
-    if (id === null) {
+    if (error === "INVALID_ID") {
+      sendJSON(response, 400, messages.project.INVALID_ID);
+      return;
+    }
+
+    if (error === "NOT_FOUND") {
+      sendJSON(response, 404, messages.project.NOT_FOUND);
       return;
     }
 
     const projectById = projects.find((project) => project.id === id);
 
     if (!projectById) {
-      response.statusCode = 404;
-      response.setHeader("Content-Type", "application/json");
-      response.end(JSON.stringify(messages.project.notFound));
+      sendJSON(response, 404, messages.project.NOT_FOUND);
 
       return;
     }
 
-    response.statusCode = 200;
-    response.setHeader("Content-Type", "application/json");
-    response.end(JSON.stringify(projectById));
+    sendJSON(response, 200, projectById);
 
     return;
   }
 
   if (request.method === "DELETE" && request.url.startsWith("/projects/")) {
-    const id = getProjectId(request, response);
+    const { id, error } = parseProjectId(request);
 
-    if (id === null) {
+    if (error === "INVALID_ID") {
+      sendJSON(response, 400, messages.project.INVALID_ID);
+      return;
+    }
+
+    if (error === "NOT_FOUND") {
+      sendJSON(response, 404, messages.project.NOT_FOUND);
       return;
     }
 
     const projectIndex = projects.findIndex((project) => project.id === id);
 
     if (projectIndex === -1) {
-      response.statusCode = 404;
-      response.setHeader("Content-Type", "application/json");
-      response.end(JSON.stringify(messages.project.notFound));
+      sendJSON(response, 404, messages.project.NOT_FOUND);
 
       return;
     }
 
     projects.splice(projectIndex, 1);
 
-    response.statusCode = 204;
-    response.end();
+    sendJSON(response, 204);
 
     return;
   }
@@ -222,26 +209,28 @@ const server = http.createServer(async (request, response) => {
 
     nextProjectId++;
 
-    response.statusCode = 201;
-    response.setHeader("Content-Type", "application/json");
-    response.end(JSON.stringify(newProject));
+    sendJSON(response, 201, newProject);
 
     return;
   }
 
   if (request.method === "PATCH" && request.url.startsWith("/projects/")) {
-    const id = getProjectId(request, response);
+    const { id, error } = parseProjectId(request);
 
-    if (id === null) {
+    if (error === "INVALID_ID") {
+      sendJSON(response, 400, messages.project.INVALID_ID);
+      return;
+    }
+
+    if (error === "NOT_FOUND") {
+      sendJSON(response, 404, messages.project.NOT_FOUND);
       return;
     }
 
     const project = projects.find((prj) => prj.id === id);
 
     if (!project) {
-      response.statusCode = 404;
-      response.setHeader("Content-Type", "application/json");
-      response.end(JSON.stringify(messages.project.notFound));
+      sendJSON(response, 404, messages.project.NOT_FOUND);
 
       return;
     }
@@ -254,24 +243,18 @@ const server = http.createServer(async (request, response) => {
 
     project.name = data.name.trim();
 
-    response.statusCode = 200;
-    response.setHeader("Content-Type", "application/json");
-    response.end(JSON.stringify(project));
+    sendJSON(response, 200, project);
 
     return;
   }
 
   if (request.method === "GET" && request.url === "/health") {
-    response.statusCode = 200;
-    response.setHeader("Content-Type", "application/json");
-    response.end(JSON.stringify(messages.health));
+    sendJSON(response, 200, messages.health);
 
     return;
   }
 
-  response.statusCode = 404;
-  response.setHeader("Content-Type", "application/json");
-  response.end(JSON.stringify(messages.notFound));
+  sendJSON(response, 404, messages.notFound);
 });
 
 server.listen(3000, () => {
